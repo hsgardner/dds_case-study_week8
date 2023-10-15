@@ -1,0 +1,542 @@
+---
+title: "Case Study 2"
+author: "Hollie Gardner"
+date: "4/06/2020"
+editor_options: 
+  chunk_output_type: console
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+#Overview
+DDSAnalytics is an analytics company that specializes in talent management solutions for Fortune 100 companies. Talent management is defined as the iterative process of developing and retaining employees. Talent management includes:
+•	workforce planning, 
+•	employee training programs, 
+•	identifying high-potential employees
+•	reducing/preventing voluntary employee turnover (attrition).
+To gain a competitive edge over its competition, DDSAnalytics is planning to leverage data science for talent management. The executive leadership has identified predicting employee turnover as its first application of data science for talent management. Before the business greenlights the project, they have tasked your data science team to conduct an analysis of existing employee data. Audience is the CEO and CFO of Frito Lay (your client). The CEO is a statistician and the CFO has had only one class in statistics.  
+
+#Analysis
+
+You have been given a dataset (CaseStudy2-data.csv) to do a data analysis to identify factors that lead to attrition.  
+•	Identify the top three factors that contribute to turnover (backed up by evidence provided by analysis). 
+•	There may or may not be a need to create derived attributes/variables/features. 
+•	Identify any job role specific trends that may exist in the data set (e.g., “Data Scientists have the highest job satisfaction”)
+•	Provide any other interesting trends and observations from your analysis. 
+•	The analysis should be backed up by robust experimentation and appropriate visualization. Experiments and analysis must be conducted in R. 
+•	Build a model to predict attrition.  
+
+
+
+```{r Libraries}
+
+colors2 <- c("#AB0E14", "#F1B11B")
+colors3 <- c("#EF1C24", "#F1B11B","#000000")
+colors4 <- c("#AB0E14", "#F1B11B", "#EF1C24","#000000")
+colors5 <- c("#AB0E14", "#F1B11B", "#EF1C24", "#F1B11B", "#957531")
+colors6 <- c("#AB0E14", "#F1B11B", "#EF1C24", "#F1B11B", "#957531", "#000000")
+  
+library(GGally)
+library(ggplot2)
+library(corrplot) 
+library(naniar) #missing value vis
+library(MASS)  #chi-sq table
+library(magrittr)
+library(dplyr)
+library(caret)
+library(e1071)
+library(class)
+
+
+CaseStudy2 <- read.csv("~/Desktop/CaseStudy2-data.csv")
+
+```
+#Tidying Data
+There were a number of variables that were defined as numeric, but were actually representations of factors. I removed the Employee Count, Over 18, and Standard Hours variables because these were all the same. I also didn't the Employee ID number for this analysis.
+
+```{r}
+
+CaseStudy2$JobSatisfaction <- as.factor(CaseStudy2$JobSatisfaction)
+CaseStudy2$EnvironmentSatisfaction <- as.factor(CaseStudy2$EnvironmentSatisfaction)
+CaseStudy2$JobLevel <- as.factor(CaseStudy2$JobLevel)
+CaseStudy2$JobInvolvement <- as.factor(CaseStudy2$JobInvolvement)
+CaseStudy2$PerformanceRating <- as.factor(CaseStudy2$PerformanceRating)
+CaseStudy2$RelationshipSatisfaction <- as.factor(CaseStudy2$RelationshipSatisfaction)
+CaseStudy2$StockOptionLevel <- as.factor(CaseStudy2$StockOptionLevel)
+CaseStudy2$WorkLifeBalance <- as.factor(CaseStudy2$WorkLifeBalance)
+CaseStudy2$Education <- as.factor(CaseStudy2$Education)
+
+#removing unnecessary columns
+#Employee Count is all 1
+CaseStudy2$EmployeeCount <- NULL
+
+#Employee Number is an unnecessary ID number
+CaseStudy2$EmployeeNumber <- NULL
+
+#All employees are Over18
+CaseStudy2$Over18 <- NULL
+
+#All Employee Standard Hours are 80
+CaseStudy2$StandardHours <-NULL
+```
+#Checking for missing values
+There are none.
+```{r}
+#missing values - all are present and no NA
+#vis_miss(CaseStudy2)
+#sum(is.na(CaseStudy2))
+```
+#Percentage of Attrition in Employees
+16.1% of the 870 employees have left Frito Lay.
+
+```{r}
+
+CaseStudy2 %>% 
+  count(Attrition) %>% 
+  mutate(pct = prop.table(n)) %>%     
+  ggplot(aes(x = Attrition, y = pct, fill = Attrition, label = scales::percent(pct))) + 
+    geom_col(position = 'dodge') + 
+    geom_text(position = position_dodge(width = .9),    # move to center of bars
+        vjust = -0.5,    # nudge above top of bar
+        size = 3) + ylab("Percentage of Employees") + ggtitle("Frito Lay Attrition") + scale_y_continuous(labels = scales::percent) + scale_fill_manual(values = colors2)
+
+```
+#Attrition by Gender
+Female - 14.97%
+Male - 16.86%
+
+The difference in percentage of attrition is not significant: 
+X-squared = 0.42363, df = 1, p-value = 0.5151
+
+
+```{r}
+#bar chart with gender and attrition
+CaseStudy2 %>%
+  ggplot(aes(x= Gender, fill = Attrition)) +
+  geom_bar(stat = "count") + scale_fill_manual(values = colors2) + 
+  ggtitle("Percentage of Attrition by Gender") + ylab("Employee Count")
+
+
+(sum(CaseStudy2$Gender == "Female" & CaseStudy2$Attrition == "Yes")/sum(CaseStudy2$Gender == "Female"))* 100
+
+(sum(CaseStudy2$Gender == "Male" & CaseStudy2$Attrition == "Yes")/sum(CaseStudy2$Gender == "Male"))* 100
+
+Gtbl = table(CaseStudy2$Gender, CaseStudy2$Attrition) 
+Gtbl
+
+chisq.test(Gtbl)
+
+```
+#Performance Rating
+We are only interested in retention of employees with a 3 or 4 performance rating, since performance ratings of under 3 are likely on a performance plan or have been terminated. 
+Employees with a 3 performance rating had 15.85% attrition. Employees with a 4 performance rating had a slightly higher percentage with 17.24% leaving. While factors like star performers being recruited to other companies could play a part in the increase, the slight difference in percentage is not significant according to Pearson's chi-sq test (p=.74).
+
+```{r}
+CaseStudy2 %>%
+  ggplot(aes(x= PerformanceRating, fill = Attrition)) +
+  geom_bar(stat = "count") + scale_fill_manual(values = colors2) + 
+  ggtitle("Percentage of Attrition by Performance Rating") + ylab("Employee Count")
+
+(sum(CaseStudy2$PerformanceRating == "3" & CaseStudy2$Attrition == "Yes")/sum(CaseStudy2$PerformanceRating == "3"))* 100
+
+(sum(CaseStudy2$PerformanceRating == "4" & CaseStudy2$Attrition == "Yes")/sum(CaseStudy2$PerformanceRating == "4"))* 100
+
+PRtbl = table(CaseStudy2$PerformanceRating, CaseStudy2$Attrition) 
+PRtbl
+
+chisq.test(PRtbl)
+
+```
+```
+#Department & JobRole
+
+There is a relationship between department and attrition (X-squared = 9.329, df = 2, p-value = 0.009424). There is an even more significant relationship between job role and attrition(X-squared = 60.543, p-value = 3.647e-10), with the lowest percentage being 1.96% of Research Directors leaving versus 45.86% of sales representatives leaving. The national trend for sales representative attrition is 27%, which makes this number higher than expected.
+
+Healthcare Representative - 10.5%
+Human Resources - 22.2%
+Laboratory Technician - 19.6%
+Manager - 7.84%
+Manufacturing Director - 2.29%
+Research Director - 1.96%
+Research Scientist - 18.6%
+Sales Executive - 16.5%
+Sales Representative - 45.28%
+```{r}
+
+CaseStudy2 %>%
+  ggplot(aes(x= JobRole, fill=Attrition)) +
+  geom_bar(stat = "count") + scale_fill_manual(values = colors5) + 
+  ggtitle("Percentage of Attrition by Job Role") + ylab("Employee Count")
+
+(sum(CaseStudy2$JobRole == "Healthcare Representative" & CaseStudy2$Attrition == "Yes")/sum(CaseStudy2$JobRole == "Healthcare Representative"))* 100
+
+(sum(CaseStudy2$JobRole == "Human Resources" & CaseStudy2$Attrition == "Yes")/sum(CaseStudy2$JobRole == "Human Resources"))* 100
+
+(sum(CaseStudy2$JobRole == "Manager" & CaseStudy2$Attrition == "Yes")/sum(CaseStudy2$JobRole == "Manager"))* 100
+
+(sum(CaseStudy2$JobRole == "Manufacturing Director" & CaseStudy2$Attrition == "Yes")/sum(CaseStudy2$JobRole == "Manufacturing Director"))* 100
+
+(sum(CaseStudy2$JobRole == "Research Director" & CaseStudy2$Attrition == "Yes")/sum(CaseStudy2$JobRole == "Research Director"))* 100
+
+(sum(CaseStudy2$JobRole == "Research Scientist" & CaseStudy2$Attrition == "Yes")/sum(CaseStudy2$JobRole == "Research Scientist"))* 100
+
+(sum(CaseStudy2$JobRole == "Laboratory Technician" & CaseStudy2$Attrition == "Yes")/sum(CaseStudy2$JobRole == "Laboratory Technician"))* 100
+
+(sum(CaseStudy2$JobRole == "Sales Executive" & CaseStudy2$Attrition == "Yes")/sum(CaseStudy2$JobRole == "Sales Executive"))* 100
+
+(sum(CaseStudy2$JobRole == "Sales Representative" & CaseStudy2$Attrition == "Yes")/sum(CaseStudy2$JobRole == "Sales Representative"))* 100
+
+(sum(CaseStudy2$PerformanceRating == "4" & CaseStudy2$Attrition == "Yes")/sum(CaseStudy2$PerformanceRating == "4"))* 100
+
+```
+#Chi-Square Test - Contingency Table for Department & Job Role
+
+                          No Yes
+  Human Resources         29   6
+  Research & Development 487  75
+  Sales                  214  59
+  
+  	Pearson's Chi-squared test
+
+data:  (tbl)
+X-squared = 9.329, df = 2, p-value = 0.009424
+                           
+                             No Yes
+  Healthcare Representative  68   8
+  Human Resources            21   6
+  Laboratory Technician     123  30
+  Manager                    47   4
+  Manufacturing Director     85   2
+  Research Director          50   1
+  Research Scientist        140  32
+  Sales Executive           167  33
+  Sales Representative       29  24
+
+	Pearson's Chi-squared test
+
+data:  JobRoletbl
+X-squared = 60.543, df = 8, p-value = 3.647e-10
+
+```{r}
+tbl = table(CaseStudy2$Department, CaseStudy2$Attrition) 
+tbl    
+
+chisq.test((tbl))
+
+JobRoletbl = table(CaseStudy2$JobRole, CaseStudy2$Attrition) 
+JobRoletbl                
+chisq.test(JobRoletbl)
+
+```
+#Age
+I converted the numeric age to factor. There is evidence(Pearson's chi-squared X-squared = 27.929, df = 4, p-value = 1.289e-05) that younger or early career employees are not sticking around with 30% of employees age 18-24 and 22% of employees age 25-33 leaving as compared to 10% of employees age 34-44 and 12% of employees age 45-55 leaving. 
+
+```{r}
+CaseStudy2$Age_factor = cut(CaseStudy2$Age, breaks = c(18,25,33,45,55,100), labels = c("18-24","25-33","34-44","45-54","55 and Older"))
+
+CaseStudy2 %>%
+  ggplot(aes(x= Age_factor, fill=Attrition)) +
+  geom_bar(stat = "count") + scale_fill_manual(values = colors5) + 
+  ggtitle("Percentage of Attrition by Age") + ylab("Employee Count")
+
+(sum(CaseStudy2$Age_factor == "1" & CaseStudy2$Attrition == "Yes")/sum(CaseStudy2$Age_factor == "1"))*100
+max(CaseStudy2$Age)
+
+AFtbl = table(CaseStudy2$Age_factor, CaseStudy2$Attrition) 
+AFtbl                
+chisq.test(AFtbl)
+```
+#Education
+Not significant
+```{r}
+CaseStudy2 %>%
+  ggplot(aes(x= Education, fill=Attrition)) +
+  geom_bar(stat = "count") + scale_fill_manual(values = colors5) + 
+  ggtitle("Percentage of Attrition by Education") + ylab("Employee Count")
+
+Educationtbl = table(CaseStudy2$Education, CaseStudy2$Attrition) 
+Educationtbl
+
+chisq.test(Educationtbl)
+
+```
+#Business Travel
+Significant p=.0499
+```{r}
+
+CaseStudy2 %>%
+  ggplot(aes(x= BusinessTravel, fill=Attrition)) +
+  geom_bar(stat = "count") + scale_fill_manual(values = colors5) + 
+  ggtitle("Percentage of Attrition by Amount of Business Travel") + ylab("Employee Count")
+
+Traveltbl = table(CaseStudy2$BusinessTravel, CaseStudy2$Attrition) 
+Educationtbl
+
+chisq.test(Traveltbl)
+
+```
+#Env Satisfaction Travel - 
+Significant p=0.01
+```{r}
+
+CaseStudy2 %>%
+  ggplot(aes(x= EnvironmentSatisfaction, fill=Attrition)) +
+  geom_bar(stat = "count") + scale_fill_manual(values = colors5) + 
+  ggtitle("Percentage of Attrition by Environment Satisfaction") + ylab("Employee Count")
+
+Envtbl = table(CaseStudy2$EnvironmentSatisfaction, CaseStudy2$Attrition) 
+Envtbl
+
+chisq.test(Envtbl)
+```
+#JobInvolvement - 
+Significant p-value = 5.211e-09
+```{r}
+
+CaseStudy2 %>%
+  ggplot(aes(x= JobInvolvement, fill=Attrition)) +
+  geom_bar(stat = "count") + scale_fill_manual(values = colors5) + 
+  ggtitle("Percentage of Attrition by Environment Satisfaction") + ylab("Employee Count")
+
+JItbl = table(CaseStudy2$JobInvolvement, CaseStudy2$Attrition) 
+JItbl
+
+chisq.test(JItbl)
+
+```
+#Stock Level Options
+Significant p-value = 3.724e-12
+```{r}
+CaseStudy2 %>%
+  ggplot(aes(x= StockOptionLevel, fill=Attrition)) +
+  geom_bar(stat = "count") + scale_fill_manual(values = colors5) + 
+  ggtitle("Percentage of Attrition by Stock Option") + ylab("Employee Count")
+
+SOtbl = table(CaseStudy2$StockOptionLevel, CaseStudy2$Attrition) 
+chisq.test(SOtbl)
+
+
+```
+#Overtime
+p-value = 2.333e-15
+```{r}
+CaseStudy2 %>%
+  ggplot(aes(x= OverTime, fill=Attrition)) +
+  geom_bar(stat = "count") + scale_fill_manual(values = colors5) + 
+  ggtitle("Percentage of Attrition by OverTime") + ylab("Employee Count")
+
+ottbl = table(CaseStudy2$OverTime, CaseStudy2$Attrition) 
+chisq.test(ottbl)
+```
+
+#Work Life Balance - significant p-value=0.0025
+```{r}
+CaseStudy2 %>%
+  ggplot(aes(x= WorkLifeBalance, fill=Attrition)) +
+  geom_bar(stat = "count") + scale_fill_manual(values = colors5) + 
+  ggtitle("Percentage of Attrition by Work Life Balance") + ylab("Employee Count")
+
+wlbtbl = table(CaseStudy2$WorkLifeBalance, CaseStudy2$Attrition) 
+wlbtbl
+chisq.test(wlbtbl)
+```
+
+#Relationship Satisfaction - significant p-value=0.0025
+```{r}
+CaseStudy2 %>%
+  ggplot(aes(x= RelationshipSatisfaction, fill=Attrition)) +
+  geom_bar(stat = "count") + scale_fill_manual(values = colors5) + 
+  ggtitle("Manager Relationship Satisfaction") + ylab("Employee Count")
+
+rstbl = table(CaseStudy2$RelationshipSatisfaction, CaseStudy2$Attrition) 
+rstbl
+chisq.test(rstbl)
+```
+
+##Boxplots of Numeric Data
+#Attrition=No group has higher median
+Age 2
+DailyRate 5
+MonthlyIncome 18
+MonthlyRate 19
+NumCompaniesWorked 20
+TotalWorkingYears 26
+Training 27
+Years at Company 29
+Years in current role 30
+Years since last promotion 31
+
+#Attrition=Yes has higher median
+DistanceFromHome 7
+Hourlyrate 12
+
+``` {r attrition relationship EDA}
+#boxplot of attrition by age[2] - Different (Yes is lower)
+CaseStudy2 %>% ggplot(aes(x = Attrition, y = Age, fill = Attrition)) + geom_boxplot(color = "black") + scale_fill_manual(values = colors2)
+
+#boxplot of attrition by daily rate[5] - Different (No is higher)
+CaseStudy2 %>% ggplot(aes(x = Attrition, y = DailyRate, fill=Attrition)) + geom_boxplot(color = "black") + scale_fill_manual(values = colors2) 
+
+#boxplot of attrition by distance from home[7] - Different (Yes is higher)
+CaseStudy2 %>% ggplot(aes(x = Attrition, y = DistanceFromHome, fill=Attrition)) + geom_boxplot(color="black") + scale_fill_manual(values = colors2) + ggtitle("Boxplot of Distribution of Distance from Home Grouped by Attrition")
+
+#boxplot attrition by hourly rate[] - Different (Yes is higher (PT? Sales & Commission?))
+CaseStudy2 %>% ggplot(aes(x = Attrition, y = HourlyRate, fill=Attrition)) + geom_boxplot(color="black") + scale_fill_manual(values = colors2)  + ggtitle("Distribution of Hourly Rate by Attrition")
+
+#boxplot attrition by monthly income - Different (No is higher)
+CaseStudy2 %>% ggplot(aes(x = Attrition, y = MonthlyIncome, fill=Attrition)) + geom_boxplot(color="black") + scale_fill_manual(values = colors2) + ggtitle("Distribution of Monthly Income by Attrition")
+
+#boxplot attrition by monthly rate - Different (No is higher)
+CaseStudy2 %>% ggplot(aes(x = Attrition, y = MonthlyRate, fill=Attrition)) + geom_boxplot(color="black") + scale_fill_manual(values = colors2) + ggtitle("Distribution of Monthly Rate by Attrition")
+
+#boxplot attrition by number of companies worked - Different (yes is lower)
+CaseStudy2 %>% ggplot(aes(x = Attrition, y = NumCompaniesWorked, fill=Attrition)) + geom_boxplot(color="black") + scale_fill_manual(values = colors2) 
+
+#boxplot attrition by percent salary raise - Same
+CaseStudy2 %>% ggplot(aes(x = Attrition, y = PercentSalaryHike, fill=Attrition)) + geom_boxplot(color="black") + scale_fill_manual(values = colors2) 
+
+#boxplot attrition by total working years - Different (Yes is lower)
+CaseStudy2 %>% ggplot(aes(x = Attrition, y = TotalWorkingYears, fill=Attrition)) + geom_boxplot(color="black") + scale_fill_manual(values = colors2) 
+
+#boxplot attrition by training last year - Different (Yes is lower)
+CaseStudy2 %>% ggplot(aes(x = Attrition, y = TrainingTimesLastYear, fill=Attrition)) + geom_boxplot(color="black") + scale_fill_manual(values = colors2) + ggtitle("Distribution of Number of Training Times Grouped by Attrition")
+
+#boxplot attrition by years at company - Different (Yes is lower)
+CaseStudy2 %>% ggplot(aes(x = Attrition, y = YearsAtCompany, fill=Attrition)) + geom_boxplot(color="black") + scale_fill_manual(values = colors2) 
+
+#boxplot attrition by years in current role - Close (Yes is lower)
+CaseStudy2 %>% ggplot(aes(x = Attrition, y = YearsInCurrentRole, fill=Attrition)) + geom_boxplot(color="black") + scale_fill_manual(values = colors2) 
+
+#boxplot attrition by years since last promotion - Same
+CaseStudy2 %>% ggplot(aes(x = Attrition, y = YearsSinceLastPromotion, fill=Attrition)) + geom_boxplot(color="black") + scale_fill_manual(values = colors2) 
+
+#boxplot attrition by years with current manager - Different (Yes is lower)
+CaseStudy2 %>% ggplot(aes(x = Attrition, y = YearsWithCurrManager, fill=Attrition)) + geom_boxplot(color="black") + scale_fill_manual(values = colors2) + ggtitle("Boxplot of Years with Current Manager Grouped by Attrition")
+
+#boxplot training session - Different (Yes is lower)
+CaseStudy2 %>% ggplot(aes(x = Attrition, y = YearsWithCurrManager, fill=Attrition)) + geom_boxplot(color="black") + scale_fill_manual(values = colors2) + ggtitle("Boxplot of Years with Current Manager Grouped by Attrition")
+
+```
+#Predicting Attrition with Naive Bayes
+
+```{r naiveBayes}
+
+#NBmodel1 <- naiveBayes(Attrition ~ ., data = CaseStudy2, laplace = 3)
+#CM1 = confusionMatrix(table(NBmodel1, CaseStudy2$Attrition))
+#CM1
+
+```
+
+```{r}
+
+CaseStudy2CompSetNoAttrition <- read.csv("~/Desktop/MSDS_6306_Doing-Data-Science-Master/Unit 14 and 15 Case Study 2/CaseStudy2CompSet No Attrition.csv")
+
+#Match NoSalary dataframe clean up to CaseStudy2
+CaseStudy2CompSetNoAttrition$JobSatisfaction <- as.factor(CaseStudy2CompSetNoAttrition$JobSatisfaction)
+CaseStudy2CompSetNoAttrition$EnvironmentSatisfaction <- as.factor(CaseStudy2CompSetNoAttrition$EnvironmentSatisfaction)
+CaseStudy2CompSetNoAttrition$JobLevel <- as.factor(CaseStudy2CompSetNoAttrition$JobLevel)
+CaseStudy2CompSetNoAttrition$JobInvolvement <- as.factor(CaseStudy2CompSetNoAttrition$JobInvolvement)
+CaseStudy2CompSetNoAttrition$PerformanceRating <- as.factor(CaseStudy2CompSetNoAttrition$PerformanceRating)
+CaseStudy2CompSetNoAttrition$RelationshipSatisfaction <- as.factor(CaseStudy2CompSetNoAttrition$RelationshipSatisfaction)
+CaseStudy2CompSetNoAttrition$StockOptionLevel <- as.factor(CaseStudy2CompSetNoAttrition$StockOptionLevel)
+CaseStudy2CompSetNoAttrition$WorkLifeBalance <- as.factor(CaseStudy2CompSetNoAttrition$WorkLifeBalance)
+CaseStudy2CompSetNoAttrition$Education <- as.factor(CaseStudy2CompSetNoAttrition$Education)
+
+#removing unnecessary columns
+#Employee Count is all 1
+CaseStudy2CompSetNoAttrition$EmployeeCount <- NULL
+
+#Employee Number is an unnecessary ID number
+CaseStudy2CompSetNoAttrition$EmployeeNumber <- NULL
+
+#All employees are Over18
+CaseStudy2CompSetNoAttrition$Over18 <- NULL
+
+#All Employee Standard Hours are 80
+CaseStudy2CompSetNoAttrition$StandardHours <-NULL
+
+#Attritionpredict <- predict(NBmodel1, newdata = CaseStudy2CompSetNoAttrition)
+#view(Attritionpredict)
+
+```
+#Correlation Plot
+
+```{r}
+numdf <- CaseStudy2[,c(2,5,7,12,18,19,20,22,26,27,29:32)]
+M <- cor(numdf, use ="all.obs")
+corrplot(M, method = "number", order = "alphabet")
+```
+#Predict Monthly Income
+
+```{r linear regression}
+
+model1 <- lm(MonthlyIncome ~Age+BusinessTravel+DailyRate+Department+DistanceFromHome+Education+EducationField+EnvironmentSatisfaction+Gender+HourlyRate+JobInvolvement+JobLevel+JobRole+JobSatisfaction+MaritalStatus+MonthlyRate+NumCompaniesWorked+OverTime+PercentSalaryHike+PerformanceRating+RelationshipSatisfaction+StockOptionLevel+TotalWorkingYears+TrainingTimesLastYear+WorkLifeBalance+YearsAtCompany+YearsInCurrentRole+YearsSinceLastPromotion+YearsWithCurrManager, data = CaseStudy2)
+
+summary(model1)
+anova(model1)
+
+plot(model1$fitted.values, model1$residuals)
+
+```
+#Model 2
+```{r}
+
+model2 <- lm(MonthlyIncome~Age+BusinessTravel+Department+Education+EducationField+EnvironmentSatisfaction+Gender+HourlyRate+TotalWorkingYears, data = CaseStudy2)
+
+summary(model2)
+
+```
+#Model 3
+```{r} 
+
+model3<- lm(MonthlyIncome ~Age+DailyRate+Department+Education+JobLevel+JobRole+NumCompaniesWorked+OverTime+PerformanceRating+TotalWorkingYears, data = CaseStudy2)
+
+summary(model3)
+confint(model3)
+```
+#Model 4
+lm(formula = MonthlyIncome ~ Department + JobLevel + JobRole + 
+    PerformanceRating + TotalWorkingYears, data = CaseStudy2)
+Adjusted R-squared:  0.9521 
+p-value: < 2.2e-16
+```{r}
+model4 <- lm(MonthlyIncome~Department+JobLevel+JobRole+PerformanceRating+TotalWorkingYears, data = CaseStudy2)
+summary(model4)
+confint(model4)
+
+```
+#Match NoSalary dataframe clean up to CaseStudy2
+```{r}
+CaseStudy2CompSetNoSalary <- read.csv("~/Desktop/CaseStudy2CompSetNoSalary.csv")
+CaseStudy2CompSetNoSalary$JobSatisfaction <- as.factor(CaseStudy2CompSetNoSalary$JobSatisfaction)
+CaseStudy2CompSetNoSalary$EnvironmentSatisfaction <- as.factor(CaseStudy2CompSetNoSalary$EnvironmentSatisfaction)
+CaseStudy2CompSetNoSalary$JobLevel <- as.factor(CaseStudy2CompSetNoSalary$JobLevel)
+CaseStudy2CompSetNoSalary$JobInvolvement <- as.factor(CaseStudy2CompSetNoSalary$JobInvolvement)
+CaseStudy2CompSetNoSalary$PerformanceRating <- as.factor(CaseStudy2CompSetNoSalary$PerformanceRating)
+CaseStudy2CompSetNoSalary$RelationshipSatisfaction <- as.factor(CaseStudy2CompSetNoSalary$RelationshipSatisfaction)
+CaseStudy2CompSetNoSalary$StockOptionLevel <- as.factor(CaseStudy2CompSetNoSalary$StockOptionLevel)
+CaseStudy2CompSetNoSalary$WorkLifeBalance <- as.factor(CaseStudy2CompSetNoSalary$WorkLifeBalance)
+CaseStudy2CompSetNoSalary$Education <- as.factor(CaseStudy2CompSetNoSalary$Education)
+
+#removing unnecessary columns
+#Employee Count is all 1
+CaseStudy2CompSetNoSalary$EmployeeCount <- NULL
+
+#Employee Number is an unnecessary ID number
+CaseStudy2CompSetNoSalary$EmployeeNumber <- NULL
+
+#All employees are Over18
+CaseStudy2CompSetNoSalary$Over18 <- NULL
+
+#All Employee Standard Hours are 80
+CaseStudy2CompSetNoSalary$StandardHours <-NULL
+```
+#Create prediction column and csv file
+```{r}
+MonthlyIncomepredict <- predict(model4, newdata = CaseStudy2CompSetNoSalary)
+
+
+write.csv(MonthlyIncomepredict, "/Users/holliegardner/Desktop/MIpredict.csv")
+```

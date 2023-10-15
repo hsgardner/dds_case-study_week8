@@ -1,0 +1,489 @@
+---
+title: "6306 Case Study 1"
+author: "Hollie Gardner & Michael Weatherford"
+date: "2/17/2020"
+output:
+  html_document: default
+  pdf_document: default
+  word_document: default
+editor_options:
+  chunk_output_type: inline
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r libraries & packages}
+
+#install packages
+#install.packages("devtools")
+#devtools::install_github("wmurphyrd/fiftystater")
+#install.packages("ggrepel")
+
+#libraries used
+library(ggplot2)
+library(imputeTS)
+library(dplyr)
+library(magrittr)
+
+library(tidyr)
+library(stringr)
+library(tidyverse)
+library(ggrepel)
+
+library(RColorBrewer)
+library(statebins)
+library(naniar)
+library(openintro)
+library(fiftystater)
+library(maps)
+library(mapproj)
+library(usmap)
+
+```
+
+# Question 1
+**How many breweries are present in each state?**
+
+With no supprises the states with higher populations have a higher number of breweries.  The general trend of more breweries for states 
+with higher populations, is due to large populations being able to support a larger beer market.  There are more breweries in Democratic 
+states/cities, this indicates that Democrats are more likely to purchase craft beer than Republicans.  This trend is consistant with 
+typical younger Democratic voters primarily living on the East and West coast, and older Republican voters living in "fly over" states 
+in the center of the United States.  These patterns give us an insight on the demographics of beer drinkers in each state.  The younger 
+more Democratic states and cities are more adventerous in try new types of beers with no brand recognition, and the older more 
+republican states are less experimental and are more habitial showing more brand loyality to established and well known breweries.
+
+```{r bar chart with states}
+
+# read in company data
+Breweries <- read.csv("~/Desktop/Breweries.csv")
+
+# pulling in state names from maps library
+lookup = data.frame(state_code = state.abb, State = state.name) #makes a data frame with State name and state_codereviation. 
+colnames(Breweries)[4]<- "state_code" # rename column to match lookup data
+Breweries$state_code = str_trim(Breweries$state_code) # removing whitespace before each value to merge w/lookup
+Breweries = merge(Breweries,lookup,"state_code") # make one dataset with state names and state_code *Lost brewery in DC
+Breweries$State <- as.character(Breweries$State)
+Breweries = rbind(Breweries, c("DC", 228, "DC Brau Brewing Company", "Washington", "District of Columbia"))
+
+#bar chart for number of breweries by state in order without creating a new dataframe - HG
+Breweries %>% 
+  count(State) %>% #library(plyr) masks dplyr count()
+  ggplot(aes(x=reorder(State, -n), y = n)) +
+    geom_bar(stat="identity", fill="#C8102E", width=.8) + # budweiser red
+    xlab("State") + ylab("Number of Breweries") + ggtitle("Number of Breweries by State") + 
+    geom_text(aes(label=n), vjust=-0.3, size=2) +
+    theme(axis.text.x = element_text(angle = 75, size = 7, hjust = 1))
+
+```
+```{r MW dataframe and barchart}
+
+num_state = as.data.frame(table(Breweries$state_code))
+colnames(num_state) <- c(as.character("state_code"),"Freq")
+num_state$state_code <- as.character(num_state$state_code)
+num_state2 <- data.frame("state_code" = as.character(c("AK", "AL", "AR", "AZ", "CA", "CO", "CT", "DC", "DE", "FL", "GA", "HI","IA", "ID", "IL", "IN", "KS", "KY", "LA", "MA", "MD", "ME", "MI", "MN","MO", "MS",  "MT", "NC", "ND", "NE", "NH", "NJ", "NM", "NV", "NY", "OH","OK", "OR", "PA", "PR", "RI", "SC", "SD", "TN", "TX", "UT", "VA", "VT","WA", "WI", "WV", "WY")),"fullState" = as.character(c("Alaska","Alabama" ,  "Arkansas", "Arizona","California" , "Colorado" , "Connecticut", "District of Columbia","Delaware" ,  "Florida" , "Georgia" ,"Hawaii","Iowa" ,"Idaho" , "Illinois" , "Indiana" ,  "Kansas" ,"Kentucky" , "Louisiana" , "Massachusetts", "Maryland" ,"Maine" ,"Michigan" , "Minnesota" , "Missouri" ,"Mississippi" ,  "Montana" ,"North Carolina","North Dakota", "Nebraska" , "New Hampshire" , "New Jersey" ,  "New Mexico" ,"Nevada" ,"New York" , "Ohio" , "Oklahoma" ,"Oregon" , "Pennsylvania" , "Puerto Rico", "Rhode Island" , "South Carolina", "South Dakota" ,"Tennessee" , "Texas" , "Utah" ,  "Virginia","Vermont" ,"Washington" , "Wisconsin", "West Virginia" , "Wyoming")))
+num_state = merge(num_state, num_state2, by="state_code")
+colnames(num_state)[3] <- "region"
+colnames(num_state)[2] <- "Freq"
+num_state$region <- as.character(num_state$region)
+
+#Bar Chart for Number of Breweries in Each State - MW
+theme_set(theme_classic())
+ggplot(num_state, aes(x = reorder(state_code, -Freq), y=Freq)) + geom_bar(stat="identity", width = 0.5, fill="#C8102E") + 
+  labs(title="Bar Chart", 
+       subtitle="Number of Breweries per State", 
+       caption="Note: Includes District of Columbia (DC)") +
+  theme(axis.text.x = element_text(angle=65, vjust=0.6)) + 
+  xlab("State") + ylab("Number of Breweries") +
+  geom_text(aes(label=Freq), vjust=-0.3, size=3.5)
+```
+
+```{r statebin breweries}
+#Plot Number of Breweries by State Bin
+statebins_continuous(state_data = num_state, state_col = "region",
+                     text_color = "white", value_col = "Freq",
+                     brewer_pal="Greys", font_size = 3,
+                     legend_title="Number of Breweries by State")
+```
+
+```{r us map of breweries}
+
+#tidying for the fiftystater map
+BreweriesCount = count(Breweries, State) #count up the occurrence in each state. 
+colnames(BreweriesCount)[2] = "breweries" #change "n" to "breweries"
+BreweriesCount$state <- tolower(BreweriesCount$State) # lower case state column for fiftystater
+
+#bring in data from fifty_states package for coordinates
+data("fifty_states") 
+
+# map_id creates the aesthetic mapping to the state name column in BreweriesCount
+p <- ggplot(BreweriesCount, aes(map_id = state)) + 
+     geom_map(aes(fill = breweries), color="white", map = fifty_states) + 
+     expand_limits(x = fifty_states$long, y = fifty_states$lat) +
+     coord_map() +
+  geom_text(data = fifty_states %>%
+              group_by(id) %>%
+              summarise(lat = mean(c(max(lat), min(lat))), long = mean(c(max(long), min(long)))) %>%
+              mutate(state = id) %>% 
+              left_join(BreweriesCount, by = "state"), aes(x = long, y = lat, label = breweries), size=2.75) +
+  scale_x_continuous(breaks = NULL) + scale_y_continuous(breaks = NULL) +
+  labs(x = "", y = "", title = "Number of Budweiser Breweries by State") +
+  theme(legend.position = "right",
+  panel.background = element_blank())
+
+
+# add border boxes to AK/HI & change gradient colors to white, budweiser red, budweiser secondary red
+brewerybystate <- p + fifty_states_inset_boxes()+ 
+  scale_fill_gradient2(low="white", mid="#C8102E", high="#860419", midpoint = 15)
+brewerybystate
+
+```
+## Process of cleaning the data from geonames
+I created a new csv file to upload instead of making you run through the geoname one with 2million+ obs.
+The process is shown and has been commented out.
+
+
+```{r creating a map with number of breweries in cities}
+#imported dataset: US.txt from geonames data US - http://download.geonames.org/export/dump/
+#US <- read.delim("~/Downloads/US/US.txt", header=FALSE)
+
+#using geonames data to create new dataframe with 4 columns
+#us_cities <- cbind.data.frame(US$V2, US$V11, US$V5, US$V6)
+#colnames(us_cities)[1] <- "City"
+#colnames(us_cities)[2] <- "State"
+#colnames(us_cities)[3] <- "lat"
+#colnames(us_cities)[4] <- "lon"
+#us_cities$cityandstate = paste(us_cities$City,us_cities$State) #creating a single column for city and state, because of duplicate city names
+#us_cities$cityandstate <- as.character(us_cities$cityandstate) #make sure it's character before merge
+#us_cities$cityandstate <- gsub("St", "Saint", us_cities$cityandstate) #fix abbreviations
+#us_cities$cityandstate <- gsub("Mt", "Mount", us_cities$cityandstate)
+#us_cities$cityandstate <- gsub(" ", "", us_cities$cityandstate) #remove whitespace
+#us_cities$cityandstate<- gsub("\\.", "", us_cities$cityandstate) # remove period
+#us_cities$cityandstate<- gsub("\\'", "", us_cities$cityandstate) # remove apostrophe
+ 
+#brewcoord = Breweries #because i didn't want to screw up the original
+#brewcoord$cityandstate= paste(brewcoord$City,brewcoord$state_code) #creating a new column
+#num_city = as.data.frame(table(brewcoord$cityandstate)) #frequency of cities
+#colnames(num_city)[1] <- "cityandstate"
+#num_city$cityandstate <- as.character(num_city$cityandstate) #change to character to merge
+#num_city$cityandstate <- gsub("St", "Saint", num_city$cityandstate) #fix abbreviations
+#num_city$cityandstate <- gsub("Mt", "Mount", num_city$cityandstate)
+#num_city$cityandstate<- gsub(" ", "", num_city$cityandstate)#remove whitespace
+#num_city$cityandstate<- gsub("\\.", "", num_city$cityandstate) # remove period
+#num_city$cityandstate<- gsub("\\'", "", num_city$cityandstate) # remove apostrophe
+
+#finally... merging the two datasets
+#Brews_City <- merge(num_city, us_cities,
+#  by.x = "cityandstate",
+#  all.x = TRUE,
+#  all.y = FALSE)
+#write.csv(Brews_City, "Brews_City.csv")
+
+Brews_City <- read.csv("~/Desktop/Brews_City.csv")
+
+#how many are missing lat?
+sum(is.na(Brews_City$lat))
+
+#visualization of missing data
+vis_miss(Brews_City) + xlab("Data Columns")
+
+```
+```{r creating dataframe with lat/lon and freq}
+#create new data set with lat and lon listed first
+Brews_City2 = cbind.data.frame(Brews_City$lat, Brews_City$lon, Brews_City$Freq)
+colnames(Brews_City2)[1] <- "lat"
+colnames(Brews_City2)[2] <- "lon"
+colnames(Brews_City2)[3] <- "freq"
+
+#omit the 10 breweries that have NA values
+Cities=na.omit(Brews_City2) 
+
+#create map with number of breweries by city
+us <- map_data('usa') #data from library(maps)
+Cities$freqfact <- cut(Cities$freq, breaks=c(0, 1, 4, Inf), labels=c("1 brewery", "2-4 breweries", "5 or more breweries")) #create new column for factor levels
+Cities$freqfact <-as.factor(Cities$freqfact)  #changing to factor
+ggplot()+
+  geom_polygon(data=us, aes(x=long, y=lat, group = group), colour="grey20", fill="white") +
+  geom_point(data = Cities, aes(x=lon, y = lat, color=freqfact, size=freqfact)) +     scale_color_manual(values=c("#808080","#C8102E","blue")) + scale_size_manual(values=c(1.5,4,6), guide=FALSE) + labs(color='Number of Breweries')  + 
+  coord_map(xlim=c(-130, -65), ylim=c(25,50)) + xlab("") + ylab("") + ggtitle("Cities with Breweries") +
+  theme_bw() 
+```
+
+# Question 2
+**Merge beer data with the breweries data. Print the first 6 observations and the last six observations to check the merged file.  (RMD only, this does not need to be included in the presentation or the deck.)**
+
+```{r merging Beers and Breweries}
+
+Beers <- read.csv("~/Desktop/Beers.csv") # read in beer data
+colnames(Beers)[5] = "Brew_ID" #change "Brewery_ID" to "Brew_ID"
+
+Beers_Breweries = merge(Breweries, Beers,"Brew_ID", all=TRUE) # merge while keeping all values
+colnames(Beers_Breweries)[3] = "Brewery_Name"  # change "Name.x" to "Brewery"
+colnames(Beers_Breweries)[5] = "State_Name" 
+colnames(Beers_Breweries)[6] = "Beer_Name" 
+head(Beers_Breweries, n=6) # first six observations
+tail(Beers_Breweries,n=6) # last six obervations
+
+```
+
+# Question 3
+**Address the missing values in each column.**
+
+Looking at the data you have provided our firm, we conducted a quality check to ensure we are giving you the best and most accurate 
+answers possible.  There were only two variables missing data, ABV and IBU.  Although not required federally, it appears to be common 
+practice to label and publish individual beers ABV, we assumed the missing 2.75% of ABV data were missing completely at random.  The IBU 
+was missing a substantial 41.7% of the data.  Most of the data represents small micro breweries that change their SKUs a lot, and are 
+not willing to incur an additional expense on test each batch of craft beer for an IBU rating.  We assumed the IBU data was missing not 
+at random.  Since over 40% of the dataset was missing IBU we did not want to throw out all the addition data so we replace empty values 
+with the data set mean IBU.
+
+```{r missing values}
+#visualization of the observations with missing values by column
+vis_miss(Beers_Breweries) + xlab("Data Columns from Merged Set")
+
+#replacing all NA values with the mean
+Beers_Breweries <- na_mean(Beers_Breweries, option = "mean") 
+
+#addressing other suspect values
+#remove can'd aid - looks to be a foundation and not a beer
+Beers_Breweries <- Beers_Breweries[Beers_Breweries$Beer_ID != 1790, ]
+
+# The CROWLER is a portmanteau of can + growler. It's a can that's the size of and is essentially a growler.
+Beers_Breweries <- Beers_Breweries[Beers_Breweries$Beer_ID != 1796, ]
+
+# Cedar Creek Special Release is just a marketing title and not a beer
+Beers_Breweries <- Beers_Breweries[Beers_Breweries$Beer_ID != 2210, ]
+
+# changing remaining missing values to the column mean
+Beers_Breweries <- na_mean(Beers_Breweries, option = "mean") 
+
+```
+
+## Question 4, ABV
+
+**Compute the median alcohol content and international bitterness unit for each state. Plot a bar chart to compare.**
+
+Looking at the barchart for median ABV by state, you can see the range is fairly consistant from slightly over 6% on the high end and 
+about 5% on the low end with Utah being an outlier.  Showing the median beer drinker is enjoying beer at a modest level of alcohol 
+content.  The bar chart of median IBU by state Shows WV enjoying a high level of bitterness compared to KS low tolerance for bitterness.
+There is a much larger range on this metric than the ABV indicating that geographic areas are more or less tolerant to the bitterness 
+flavor profile, keep in mind the states with fairly consistant IBU medians in the center of the bar chart are heavily affected by the 
+40% of missing data and is due to us filling in the missing data with the mean.
+
+```{r Median ABV barchart}
+
+#Median ABV & IBU by State
+# create dataframe for median ABV by state, **note to MW - I changed this to avoid using the plyr package**
+med_ABV <- Beers_Breweries %>%
+  group_by(state_code) %>%
+  summarize(medianABV = median(ABV))
+
+#create dataset for median IBU by state
+med_IBU<- Beers_Breweries %>%
+  group_by(state_code) %>%
+  summarize(medianIBU = median(IBU))
+
+# merging median ABV and median IBU
+med_bar = merge(med_ABV, med_IBU, by="state_code")
+colnames(med_bar)[2] <- "Median_ABV"
+colnames(med_bar)[3] <- "Median_IBU"
+
+#Median ABV Map Viz
+theme_set(theme_classic())
+ggplot(med_bar, aes(x = reorder(state_code, -Median_ABV), y=Median_ABV)) + geom_bar(stat="identity", width = 0.5, fill="#C8102E") + 
+  labs(subtitle="Median ABV by State", 
+       caption="Note: Includes District of Columbia (DC)") +
+  theme(axis.text.x = element_text(angle=90, vjust=0.6)) + 
+  xlab("State") + ylab("Alcohol by Volume (ABV)") 
+
+```
+# Question 4, IBU
+
+**Compute the median alcohol content and international bitterness unit for each state. Plot a bar chart to compare.**
+
+```{r Median IBU chart}
+#Median IBU Map Viz
+theme_set(theme_classic())
+ggplot(med_bar, aes(x = reorder(state_code, -Median_IBU), y=Median_IBU)) + geom_bar(stat="identity", width = 0.6, fill="#C8102E") + 
+  labs(subtitle="Median IBU by State", 
+       caption="Note: Includes District of Columbia (DC)") +
+  theme(axis.text.x = element_text(angle=90, vjust=0.6)) + 
+  xlab("State") + ylab("International Bitterness Unit (IBU)") 
+
+```
+# Question 5
+
+**Which state has the maximum alcoholic (ABV) beer? Which state has the most bitter (IBU) beer?**
+
+The beers with the highest ABV were primarily in the center of the United States (CO, KY, IN).  This could indicate the center of the US 
+puts more importance on alcohol content than taste.  The states with the maximum IBU follows fairly close the map for number of 
+breweries per capita.  Once again confirming that younger democratic beer drinkers are more adventerous and willing to exlore beers with 
+higher bitterness flavor profile.
+
+```{r}
+library(plyr)
+#Maximums question
+max_ABV = data.frame(ddply(Beers_Breweries,~state_code,summarise,max=max(ABV)))
+max_IBU = data.frame(ddply(Beers_Breweries,~state_code,summarise,max=max(IBU)))
+colnames(max_ABV)[1] <- "state_code"
+colnames(max_IBU)[1] <- "state_code"
+max_ABV = merge(max_ABV, num_state2, by="state_code")
+max_IBU = merge(max_IBU, num_state2, by="state_code")
+max_ABV$fullState <- as.character(max_ABV$fullState)
+max_IBU$fullState <- as.character(max_IBU$fullState)
+
+#Max Viz ABV
+statebins_continuous(state_data = max_ABV, state_col = "fullState",
+                     text_color = "white", value_col = "max",
+                     brewer_pal="Greys", font_size = 3,
+                     legend_title="Max ABV by State")
+
+#Max Viz IBU
+statebins_continuous(state_data = max_IBU, state_col = "fullState",
+                     text_color = "white", value_col = "max",
+                     brewer_pal="Greys", font_size = 3,
+                     legend_title="Max IBU by State")
+
+#Obs with Max ABV & Value
+max(Beers_Breweries$ABV)
+which.max(Beers_Breweries$ABV)
+
+#Upslope Brewing Company -	Lee Hill Series Vol. 5 - Belgian Style Quadrupel Ale	12.8
+
+max(Beers_Breweries$IBU)
+which.max(Beers_Breweries$IBU)
+
+#Astoria Brewing Company - Bitter Bitch Imperial IPA	138
+
+```
+# Question 6
+
+**Comment on the summary statistics and distribution of the ABV variable.**
+When checking our assumptions, the ABV is normally distributed as evidenced by the QQPlot. The histogram further reinforces this with a mostly normal distribution, with some slight right skewness with some beers that test the limits of the ABV content. 
+
+```{r Question 6}
+#Statistics Summary for ABV
+Beers_Breweries %>% ggplot(aes(x = ABV)) + geom_histogram(color="black", fill="#C8102E") + ggtitle("Histogram of ABV") + geom_vline(aes(xintercept=mean(ABV)), color="blue", linetype="dashed", size=1) + geom_density(alpha=.2, fill="black") 
+
+qqnorm(Beers_Breweries$ABV, pch = 1, frame = FALSE)
+qqline(Beers_Breweries$ABV, col = "#C8102E", lwd = 2)
+```
+
+# Question 7
+
+**Is there an apparent relationship between the bitterness of the beer and its alcoholic content? Draw a scatter plot.  Make your
+best judgment of a relationship and EXPLAIN your answer.**
+
+Looking at ABV and IBU there is a positive linear correlation.  As the beer has higher alcohol content it tends to have a higher IBU.  
+More importantly, this graph shows the flavor profile that most breweries are producing their beers at.  Around 5% ABV and 25 IBU we see 
+a dense "sweet spot" of beers.  If a brewery wanted to reach the largest number of consumers this is the ABV and IBU most beer drinkers 
+enjoy.  As you move away from this sweet spot the number of beers is substantially lower and less dense.  We reccommend that your core 
+SKUs that are trying to reach the most consumers and bring in the most revenue are close to this area, with much smaller percent of 
+experimental beers outside the sweet spot.  It is good to note at about 45 IBU there is a spot of high density and that is due to the 
+mean being filled in for the missing IBU measurements and is not a accurate representation of the most sought after beer flavor profile.
+
+```{r scatter plot bitterness & alc content}
+#Scatter Plot Viz
+ggplot(Beers_Breweries, aes(x=ABV, y=IBU)) + geom_point(color="#C8102E") + geom_smooth(method=lm) + geom_density_2d(color="black")
+
+```
+
+# Question 8
+
+**Budweiser would also like to investigate the difference with respect to IBU and ABV between IPAs (India Pale Ales) and other types of Ale (any beer with “Ale” in its name other than IPA).  You decide to use KNN classification to investigate this relationship.  Provide statistical evidence one way or the other. You can of course assume your audience is comfortable with percentages … KNN is very easy to understand conceptually.**
+
+With 84% accuracy(k=5), we are able to predict if an ale is an IPA or not using the given ales in the Beers dataset. 
+
+```{r knn IBU and ABV}
+
+#knn question - load libraries
+library(class)
+library(caret)
+library(e1071)
+
+IPAorAle = dplyr::filter(Beers_Breweries, grepl('IPA|Ale', Style))
+IPAorAle$Type <- ifelse(grepl("IPA", IPAorAle$Style), "IPA", "Ale")
+summary(IPAorAle)
+
+set.seed(6)
+splitPerc = .75
+trainIndices = sample(1:dim(IPAorAle)[1],round(splitPerc * dim(IPAorAle)[1]))
+train = IPAorAle[trainIndices,]
+test = IPAorAle[-trainIndices,]
+
+IPAorAle %>% ggplot(aes(x = ABV, IBU, color = Type)) + geom_point() + scale_color_manual(values = c("#C8102E", "#000000")) + ggtitle("IPA and Ale Beer Styles")
+
+# k = 5
+classifications = knn(train[,c(8,9)],test[,c(8,9)],train$Type, prob = TRUE, k = 5)
+table(test$Type,classifications)
+confusionMatrix(table(test$Type,classifications))
+
+```
+
+# Question 9
+
+**Knock their socks off!  Find one other useful inference from the data that you feel Budweiser may be able to find value in.  You must convince them why it is important and back up your conviction with appropriate statistical evidence.** 
+
+The boxplots of the selected style groups demonstrate that there is a difference in median ABVs by the style with IPAs, Stouts, and Porters having higher ABV medians. 
+
+```{r Question 9 analysis}
+
+#histogram of American IPA ABV distribution
+AmericanIPA <- Beers_Breweries[Beers_Breweries$Style == "American IPA",]
+Beers_Breweries[Beers_Breweries$Style == "American IPA",] %>%   
+  ggplot(mapping = aes(x = ABV)) +
+  geom_histogram(bins=15, color="black", fill="#C8102E",) + ggtitle("American IPA IBU distribution")
+
+#scatter plot American IPA ABV vs. IBU
+ggplot(AmericanIPA, aes(x=ABV, y=IBU)) + geom_point(color="#C8102E") + geom_smooth(method=lm)
+
+#bar chart of number of beers per style
+freqStyle = as.data.frame(table(Beers_Breweries$Style))
+freqStyle %>%
+  ggplot(aes(x=reorder(Var1, -Freq), y = Freq)) +
+    geom_bar(stat="identity", fill="#C8102E", width=.8) + # budweiser red
+    xlab("Style") + ylab("Number of Beers") + ggtitle("Number of Beers by Style") + 
+    geom_text(aes(label=Freq), vjust=-0.3, size=2) +
+    theme(axis.text.x = element_text(angle = 75, size = 7, hjust = 1))
+
+#creating a new Type column to hold broader Style groups
+Stout = dplyr::filter(Beers_Breweries, grepl('Stout', Style))
+Stout$Type <- "Stout"
+
+Porter = dplyr::filter(Beers_Breweries, grepl('Porter', Style))
+Porter$Type <- "Porter"
+
+Lager = dplyr::filter(Beers_Breweries, grepl('Lager', Style))
+Lager$Type <- "Lager"
+
+Witbier = dplyr::filter(Beers_Breweries, grepl('Witbier', Style))
+Witbier$Type <- "Witbier"
+
+Pilsner = dplyr::filter(Beers_Breweries, grepl('Pilsner|Pilsener', Style))
+Pilsner$Type <- "Pilsner"
+
+#merging dataframes back together
+Beers_Types = rbind(Stout, Porter, IPAorAle, Lager, Pilsner, Witbier)
+
+#plot ABV boxplot by selected style groups  
+p <- ggplot(Beers_Types, aes(x=Type, y=ABV, fill=Type)) + 
+  geom_boxplot() + xlab("Style Group") + ylab("ABV Distribution") + ggtitle("Boxplots of ABV by Selected Style Groups")
+  
+p + scale_fill_manual(values=c("#860419","#C8102E","#ED3F48", "#FF6263", "#FF8380","#FFA59E","#FFF4F1"))
+
+#plot IBU boxplot by selected style groups    
+p <- ggplot(Beers_Types, aes(x=Type, y=IBU, fill=Type)) + xlab("Style Group") + ylab("IBU Distribution") + geom_boxplot() + ggtitle("Boxplots of IBU by Selected Style Groups")
+
+p + scale_fill_manual(values=c("#860419","#C8102E","#ED3F48", "#FF6263", "#FF8380","#FFA59E","#FFF4F1"))
+
+#facet wrap by ABV
+ggplot(data = Beers_Types) + 
+geom_histogram(mapping = aes(x = ABV), fill="#C8102E", bins=10) + ggtitle("ABV Histogram of Select Style Groups") + xlab("ABV by Style Group") + ylab("Number of Beers") +
+facet_grid(~Type)
+
+#facet wrap by IBU
+ggplot(data = Beers_Types,) + 
+geom_histogram(mapping = aes(x = IBU), fill="#C8102E", bins=10) + ggtitle("IBU Histogram of Select Style Groups")+
+facet_grid(~Type)
+
+```
